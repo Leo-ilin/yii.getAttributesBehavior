@@ -70,7 +70,7 @@ class GetAttributesBehavior extends CActiveRecordBehavior {
 	 * Возвращает только безопасные атрибуты строго для установленного сценария.
 	 * Если сценарий не задан, то получает сценарий из модели,
 	 * если он не установлен у модели, или сценарий не используется в правилах модели, то возвращает пустой массив;
-	 * Если атрибута не существует, ему будет присвоен null (@see CActiveRecord::getAttribute())
+	 * Если атрибута не существует, будет выполнена попытка получить значение через геттер, иначе ему будет присвоен null (@see CActiveRecord::getAttribute())
 	 * @param string $scenario use a scenario to only display safe attributes
 	 * @return array
 	 */
@@ -82,45 +82,63 @@ class GetAttributesBehavior extends CActiveRecordBehavior {
 
 		// check if user supplied a scenario, and if this object has any rules
 		if (!empty($scenario) && is_array($owner->rules())) {
-
-			$attributes = array();
-			foreach ($owner->rules() as $rule) {
-				$on=array();
-				if(isset($rule['on'])) {
-					if(is_array($rule['on'])) {
-						$on=$rule['on'];
-					} else {
-						$on=preg_split('/[\s,]+/',$rule['on'],-1,PREG_SPLIT_NO_EMPTY);
-					}
-				}
-
-				// check if this scenario name matches the supplied one
-				// & check if this is the 'safe' option
-				if (in_array($scenario, $on) && (isset($rule[0],$rule[1]) && $rule[1] === 'safe')) {
-					if(is_array($rule[0])) {
-						$safe_attributes = $rule[0];
-					} else {
-						$safe_attributes = preg_split('/[\s,]+/',$rule[0],-1,PREG_SPLIT_NO_EMPTY);
-					}
-
-					foreach ($safe_attributes as $safe_attribute) {
-						if(!$owner->hasAttribute($safe_attribute)){
-							$getter='get'.$safe_attribute;
-							if(method_exists($owner, $getter))
-								$attributes[$safe_attribute] = $owner->$getter();
-						}
-						if(!isset($attributes[$safe_attribute])) {
-							$attributes[$safe_attribute] = $owner->getAttribute($safe_attribute);
+			$attributes = [];
+			$safe_attributes = $this->getSafeAttributes($scenario);
+			foreach ($safe_attributes as $safe_attribute) {
+				if(!isset($attributes[$safe_attribute])){
+					if($owner->hasAttribute($safe_attribute)) {
+						$attributes[$safe_attribute] = $owner->getAttribute($safe_attribute);
+					} else if(!$owner->hasAttribute($safe_attribute) && !$owner->hasRelated($safe_attribute)) {
+						$getter='get'.ucfirst($safe_attribute);
+						if(method_exists($owner,$getter)){
+							$attributes[$safe_attribute] = $owner->$getter();
+						} else {
+							$attributes[$safe_attribute] = null;
 						}
 					}
 				}
 			}
+
 			return $attributes;
 
 		}
 		return array();
 		//return $owner->attributes;
 	}
+
+	/**
+	 * Возвращает список безопасных атрибутов (safe) для указанного сценария
+	 * @param $scenario
+	 * @return array
+	 */
+	public function getSafeAttributes($scenario){
+		$owner = $this->getOwner();
+		$safe_attributes = [];
+		foreach ($owner->rules() as $rule) {
+			$on=array();
+			if(isset($rule['on'])) {
+				if(is_array($rule['on'])) {
+					$on=$rule['on'];
+				} else {
+					$on=preg_split('/[\s,]+/',$rule['on'],-1,PREG_SPLIT_NO_EMPTY);
+				}
+			}
+
+			// check if this scenario name matches the supplied one
+			// & check if this is the 'safe' option
+			if (in_array($scenario, $on) && (isset($rule[0],$rule[1]) && $rule[1] === 'safe')) {
+				if(is_array($rule[0])) {
+					$_attributes = $rule[0];
+				} else {
+					$_attributes = preg_split('/[\s,]+/',$rule[0],-1,PREG_SPLIT_NO_EMPTY);
+				}
+				$safe_attributes = array_merge($safe_attributes, $_attributes);
+			}
+		}
+
+		return array_unique($safe_attributes);
+	}
+
 
 	/**
 	 * @param CActiveRecord $obj
